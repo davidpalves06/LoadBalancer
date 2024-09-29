@@ -9,9 +9,9 @@ ServiceRouter.post("/services",(req,res) => {
         res.status(400).send("Request is malformed.")
         return;
     }
-    const success = serviceManager.registerService(req.body);
+    const {success,err} = serviceManager.registerService(req.body);
     if (success) res.status(201).send("Service Registered.");
-    else res.status(400).send("Service already exists");
+    else res.status(400).send(err);
 });
 
 
@@ -21,9 +21,9 @@ ServiceRouter.put("/services/:serviceID",(req,res) => {
         res.status(400).send("Request is malformed.")
         return;
     }
-    const success = serviceManager.updateService(req.body);
+    const {success,err} = serviceManager.updateService(req.body);
     if (success) res.status(201).send("Service Updated.");
-    else res.status(400).send("Service not found.");
+    else res.status(400).send(err);
 });
 
 
@@ -36,12 +36,12 @@ ServiceRouter.get("/services/:serviceID",(req,res) => {
 
 ServiceRouter.get("/services",(req,res) => {
     const services = serviceManager.getAllServices();
-    if (services != undefined) res.status(201).json(services);
+    res.status(201).json(services);
 });
 
 ServiceRouter.delete("/services/:serviceID",(req,res) => {
     const serviceID = req.params.serviceID;
-    const service = serviceManager.deleteService(serviceID);
+    serviceManager.deleteService(serviceID);
     res.status(204).send();
 });
 

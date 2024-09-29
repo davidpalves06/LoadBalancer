@@ -8,28 +8,28 @@ class ServiceManager {
 
     registerService(service) {
         if (this.exists(service.name)) {
-            console.log(`Service named ${service.name} already exists`);
-            return false;
+            return {success:false,err:`Service named ${service.name} already exists`};
         }
-        const serviceServer = http.createServer((req,res) => {
-            //TODO: Proxy request
-            res.writeHead(200);
-            res.end("Not implemented yet...")
-        });
-        this.servers[service.port] = serviceServer;
-        serviceServer.listen(service.port,() => {
-            console.log(`Starting listening to requests on port ${service.port} for service ${service.name}`);
-        });
+        if (this.servers[service.port] != undefined) {
+            return {success:false,err:`Service port ${service.port} already occupied.`};         
+        }
+        this.#createServer(service.port);
         this.services[service.name] = service;
-        return true;
+        return {success:true};
     }
 
     updateService(service) {
         if (!this.exists(service.name)) {
-            console.log(`Service named ${service.name} not found.`);
-            return false;
+            return {success:false,err:`Service named ${service.name} not found.`};
         }
-        //TODO: LOGIC WHEN UPDATING A SERVICE INFORMATION
+        const currPort = this.services[service.name].port;
+        const newPort = service.port;
+        if (newPort != currPort) {
+            this.#closeServer(currPort);
+            this.#createServer(newPort);
+        }
+        this.services[service.name] = service;
+        return {success:true};
     }
 
     exists(serviceName) {
@@ -55,6 +55,25 @@ class ServiceManager {
         return service;
     }
 
+    #closeServer(servicePort) {
+        const oldServer = this.servers[servicePort];
+        oldServer.close(() => {
+            console.log(`Closing port ${servicePort}`);
+            this.servers[servicePort] = undefined;
+        });
+    }
+
+    #createServer(servicePort) {
+        const serviceServer = http.createServer((req,res) => {
+            //TODO: Proxy request
+            res.writeHead(200);
+            res.end("Not implemented yet...")
+        });
+        this.servers[servicePort] = serviceServer;
+        serviceServer.listen(servicePort,() => {
+            console.log(`Starting listening to requests on port ${servicePort}.`);
+        });
+    }
 }
 
 const serviceManager = new ServiceManager();
