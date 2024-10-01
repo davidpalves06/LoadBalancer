@@ -7,17 +7,17 @@ class InstanceManager {
 
     async registerInstance(instance) {
         const serviceName = instance.service;
-        const service = serviceManager.getService(serviceName);
+        const service = await serviceManager.getService(serviceName);
         if (service == undefined) {
             return {success:false,err:"Service not found. Could not add instance"}
         }
-        if (this.exists(instance.name)) {
+        if (await this.exists(instance.name)) {
             return {success:false,err:"Instance with same name already exists"}
         }
         
         const instances = service.instances;
         for (const instanceID of instances) {
-            const serviceInstance = this.getInstance(instanceID);
+            const serviceInstance = await this.getInstance(instanceID);
             if (serviceInstance.location == instance.location) {
                 return {success:false,err:"Instance with same location already exists"};
             }
@@ -31,10 +31,10 @@ class InstanceManager {
     }
 
     async deleteInstance(instanceID) {
-        const serviceInstance = this.getInstance(instanceID);
+        const serviceInstance = await this.getInstance(instanceID);
+        if (serviceInstance == undefined) return undefined;
         const service = await serviceManager.getService(serviceInstance.service);
-        const instances = service.instances;
-        instances = instances.filter(instance => instance != instanceID);
+        const instances = service.instances.filter(instance => instance != instanceID);
         service.instances = instances;
         await serviceManager.updateService(service);
         await redisClient.del("INSTANCE:"+instanceID);
@@ -46,14 +46,15 @@ class InstanceManager {
     }
 
     async exists(instanceName) {
-        return await redisClient.exists("INSTANCE:" + instanceName) ? true : false;
+        const exists = await redisClient.exists("INSTANCE:" + instanceName) ? true : false;
+        return exists;
     }
 
     async #setInstanceRedis(instance) {
         await redisClient.set("INSTANCE:"+ instance.name,JSON.stringify(instance));
     }
 
-    async #getInstanceFromRedis() {
+    async #getInstanceFromRedis(instance) {
         return JSON.parse(await redisClient.get("INSTANCE:"+ instance))
     }
 }

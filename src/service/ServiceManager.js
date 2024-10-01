@@ -4,6 +4,7 @@ import redisClient from "../db/RedisClient.js";
 class ServiceManager {
     constructor(){
         this.servers = {};
+        this.roundRobinTracker = {}
     }
 
     async registerService(service) {
@@ -13,8 +14,11 @@ class ServiceManager {
         if (this.servers[service.port] != undefined) {
             return {success:false,err:`Service port ${service.port} already occupied.`};         
         }
-        this.#createServer(service.port);
+        this.#createServer(service);
         service.instances = [];
+        if (service.balancingStrategy == "ROUND ROBIN") {
+            this.roundRobinTracker[service.name] = {tracker:0};
+        }
         this.#setServiceRedis(service);
         return {success:true};
     }
@@ -23,14 +27,14 @@ class ServiceManager {
         if (!this.exists(service.name)) {
             return {success:false,err:`Service named ${service.name} not found.`};
         }
-        const currentService = this.#getServiceFromRedis(service.name);
+        const currentService = await this.#getServiceFromRedis(service.name);
         const currPort = currentService.port;
         const newPort = service.port;
+        
         if (newPort != currPort) {
             this.#closeServer(currPort);
             this.#createServer(newPort);
         }
-        service.instances = [];
         this.#setServiceRedis(service);
         return {success:true};
     }
@@ -41,7 +45,7 @@ class ServiceManager {
     }
 
     async getService(serviceName) {
-        return this.#getServiceFromRedis(serviceName);
+        return await this.#getServiceFromRedis(serviceName);
     }
 
     async getAllServices() {
@@ -52,20 +56,21 @@ class ServiceManager {
         do {
             const result = await redisClient.scan(cursor);
             cursor = result.cursor;
-            keys = keys.concat(result.keys);
+            keys = keys.concat(result.keys.filter(key => key.startsWith("SERVICE:")));
         } while (cursor != '0');
 
         
         for (const key of keys) {
-            const value = this.#getServiceFromRedis(key);
-            values.push({ key, value });
+            const value = await JSON.parse(await redisClient.get(key));
+            values.push({ ...value });
         }
 
         return values;
     }
 
     async deleteService(serviceName) {
-        const service = this.#getServiceFromRedis(serviceName);
+        const service = await this.#getServiceFromRedis(serviceName);
+        if (service == undefined) return undefined;
         await redisClient.del("SERVICE:" + serviceName);
         this.#closeServer(service.port);
         return service;
@@ -79,12 +84,14 @@ class ServiceManager {
         });
     }
 
-    #createServer(servicePort) {
-        const serviceServer = http.createServer((req,res) => {
-            //TODO: Proxy request
+    #createServer(service) {
+        const serviceServer = http.createServer(async (req,res) => {
+            const requestService = await this.#getServiceFromRedis(service.name);
             res.writeHead(200);
+            res.write(JSON.stringify(requestService));
             res.end("Not implemented yet...")
         });
+        const servicePort = service.port;
         this.servers[servicePort] = serviceServer;
         serviceServer.listen(servicePort,() => {
             console.log(`Starting listening to requests on port ${servicePort}.`);
@@ -97,6 +104,14 @@ class ServiceManager {
 
     async #getServiceFromRedis(serviceName) {
         return JSON.parse(await redisClient.get("SERVICE:" +serviceName));
+    }
+
+    async bootServices() {
+        const services = await this.getAllServices();
+        for (const service of services) {
+            this.#createServer(service);
+            this.roundRobinTracker[service.name] = {tracker:0};
+        }
     }
 }
 

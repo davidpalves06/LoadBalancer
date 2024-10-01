@@ -3,9 +3,9 @@ import serviceManager from "./ServiceManager.js";
 
 const ServiceRouter = express.Router();
 
-ServiceRouter.post("/services",async (req,res) => {
-    const {name, port, properties} = req.body;
-    if (name == undefined || typeof port !== 'number' || isNaN(port) || port < 1024) {
+ServiceRouter.post("/",async (req,res) => {
+    const {name, port,balancingStrategy} = req.body;
+    if (name == undefined || typeof port !== 'number' || isNaN(port) || port < 1024 || balancingStrategy == undefined) {
         res.status(400).send("Request is malformed.")
         return;
     }
@@ -15,9 +15,9 @@ ServiceRouter.post("/services",async (req,res) => {
 });
 
 
-ServiceRouter.put("/services/:serviceID",async (req,res) => {
-    const {name, port, properties} = req.body;
-    if (name == undefined || typeof port !== 'number' || isNaN(port) || port < 1024) {
+ServiceRouter.put("/:serviceID",async (req,res) => {
+    const {name, port,balancingStrategy} = req.body;
+    if (name == undefined || typeof port !== 'number' || isNaN(port) || port < 1024 || balancingStrategy == undefined) {
         res.status(400).send("Request is malformed.")
         return;
     }
@@ -27,22 +27,25 @@ ServiceRouter.put("/services/:serviceID",async (req,res) => {
 });
 
 
-ServiceRouter.get("/services/:serviceID",async (req,res) => {
+ServiceRouter.get("/:serviceID",async (req,res) => {
     const serviceID = req.params.serviceID;
     const service = await serviceManager.getService(serviceID);
     if (service != undefined) res.status(201).json(service);
     else res.status(404).send("Service not found.");
 });
 
-ServiceRouter.get("/services",async (req,res) => {
+ServiceRouter.get("/",async (req,res) => {
     const services = await serviceManager.getAllServices();
     res.status(201).json(services);
 });
 
-ServiceRouter.delete("/services/:serviceID",(req,res) => {
+ServiceRouter.delete("/:serviceID",async (req,res) => {
     const serviceID = req.params.serviceID;
-    serviceManager.deleteService(serviceID);
-    res.status(204).send();
+    const removedService = await serviceManager.deleteService(serviceID);
+    if (removedService == undefined) res.status(404).send();
+    else res.status(204).send();
 });
+
+serviceManager.bootServices();
 
 export default ServiceRouter;

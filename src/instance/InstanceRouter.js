@@ -3,7 +3,7 @@ import instanceManager from "./InstanceManager.js";
 
 const InstanceRouter = express.Router();
 
-InstanceRouter.post("/instances/",async (req,res) => {
+InstanceRouter.post("/",async (req,res) => {
     const {name, location,service} = req.body;
     if (name == undefined || location == undefined || service == undefined) {
         res.status(400).send("Request is malformed.")
@@ -14,13 +14,14 @@ InstanceRouter.post("/instances/",async (req,res) => {
     else res.status(400).send(err);
 });
 
-InstanceRouter.delete("/instances/:instanceID",(req,res) => {
+InstanceRouter.delete("/:instanceID",async (req,res) => {
     const instanceID = req.params.instanceID;
-    instanceManager.deleteInstance(instanceID);
-    res.status(204).send();
+    const removedInstance = await instanceManager.deleteInstance(instanceID);
+    if (removedInstance == undefined) res.status(404).send();
+    else res.status(204).send();
 });
 
-InstanceRouter.get("/instances/:instanceID",async (req,res) => {
+InstanceRouter.get("/:instanceID",async (req,res) => {
     const instanceID = req.params.instanceID;
     const instance = await instanceManager.getInstance(instanceID);
     if (instance != undefined) res.status(201).json(instance);

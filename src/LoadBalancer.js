@@ -2,6 +2,7 @@ import express from "express"
 import dotenv from 'dotenv';
 import ServiceRouter from "./service/ServiceRouter.js";
 import redisClient from "./db/RedisClient.js";
+import InstanceRouter from "./instance/InstanceRouter.js";
 
 dotenv.config();
 
@@ -11,7 +12,8 @@ const port = process.env.PORT || 10000;
 const app = express();
 app.use(express.json());
 
-app.use("/",ServiceRouter);
+app.use("/services",ServiceRouter);
+app.use("/instances",InstanceRouter);
 
 
 const server = app.listen(port, () => {
