@@ -1,5 +1,7 @@
 import http from "http"
 import redisClient from "../db/RedisClient.js";
+import instanceManager from "../instance/InstanceManager.js";
+import fetch from "node-fetch";
 
 class ServiceManager {
     constructor(){
@@ -18,6 +20,9 @@ class ServiceManager {
         service.instances = [];
         if (service.balancingStrategy == "ROUND ROBIN") {
             this.roundRobinTracker[service.name] = {tracker:0};
+        }
+        else if (service.balancingStrategy != "RANDOM" || service.balancingStrategy != "IN REQUEST") {
+            return {success:false,err:`Balancing strategy is not known.`};     
         }
         this.#setServiceRedis(service);
         return {success:true};
@@ -86,10 +91,7 @@ class ServiceManager {
 
     #createServer(service) {
         const serviceServer = http.createServer(async (req,res) => {
-            const requestService = await this.#getServiceFromRedis(service.name);
-            res.writeHead(200);
-            res.write(JSON.stringify(requestService));
-            res.end("Not implemented yet...")
+            this.#handleRequest(service);
         });
         const servicePort = service.port;
         this.servers[servicePort] = serviceServer;
@@ -112,6 +114,64 @@ class ServiceManager {
             this.#createServer(service);
             this.roundRobinTracker[service.name] = {tracker:0};
         }
+    }
+
+    async #handleRequest(service) {
+        const requestService = await this.#getServiceFromRedis(service.name);
+            const instances = requestService.instances;
+            if (instances.length == 0) {
+                res.writeHead(400);
+                res.end("No service instances available.");
+                return;
+            }
+            let instanceNameToSend = undefined;   
+            switch (requestService.balancingStrategy) {
+                case "ROUND ROBIN":
+                    const currentTracker = this.roundRobinTracker[service.name].tracker;
+                    instanceNameToSend = instances[currentTracker];
+                    if (currentTracker == instances.length - 1) this.roundRobinTracker[service.name] = 0;
+                    else this.roundRobinTracker[service.name]++;
+                    break;
+                case "RANDOM":
+                    const randomTracker = Math.round(Math.random() * (instances.length - 1));
+                    instanceNameToSend = instances[randomTracker];
+                    break;
+                case "IN REQUEST":
+                    const specificInstance = req.headers["specific-instance"];
+                    if (specificInstance == undefined) {
+                        res.writeHead(400);
+                        res.end("No instance specified in request");
+                        return;
+                    }
+                    instanceNameToSend = instances.filter((instance) => instance.name == specificInstance)[0];
+                    if (instanceNameToSend == undefined) {
+                        res.writeHead(400);
+                        res.end("Instance with specified name does not exist");
+                        return;
+                    }
+                    break;
+                default:
+                    res.writeHead(400);
+                    res.end("No balancing strategy available for this service");
+                    return;
+            }
+            let instanceToSend = await instanceManager.getInstance(instanceNameToSend);
+            
+            await fetch(instanceToSend.location,{
+                method: req.method,
+                headers: {
+                    ... req.headers,
+                    "load_balancing_strategy": requestService.balancingStrategy,
+                    "load_balancing_version" : "v1.0",
+                    "load_balancing_software" : "CUSTOM_DAVID_LOAD_BALANCER"
+                }
+            }).then((response) => {
+                res.write(response.body);
+                res.writeHead(response.status,response.headers).end();
+            }).catch((err) => {
+                res.writeHead(500);
+                res.end(`Error connecting to server : ${err.message}`)
+            }); 
     }
 }
 
