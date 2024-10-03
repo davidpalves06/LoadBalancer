@@ -1,8 +1,9 @@
 import http from "http"
-import redisClient from "../db/RedisClient.js";
+import redisClient, { releaseLock,acquireLock } from "../db/RedisClient.js";
 import instanceManager from "../instance/InstanceManager.js";
 import fetch from "node-fetch";
 
+const redisLockKey = "SERVICELOCK"
 class ServiceManager {
     constructor(){
         this.servers = {};
@@ -10,6 +11,11 @@ class ServiceManager {
     }
 
     async registerService(service) {
+        let lock = await acquireLock(redisLockKey)
+        while (!lock) {
+            await sleep(50);
+            lock = await acquireLock(redisLockKey);
+        }
         if (!this.exists(service.name)) {
             return {success:false,err:`Service named ${service.name} already exists`};
         }
@@ -25,10 +31,16 @@ class ServiceManager {
             return {success:false,err:`Balancing strategy is not known.`};     
         }
         this.#setServiceRedis(service);
+        await releaseLock(redisLockKey);
         return {success:true};
     }
 
     async updateService(service) {
+        let lock = await acquireLock(redisLockKey)
+        while (!lock) {
+            await sleep(50);
+            lock = await acquireLock(redisLockKey);
+        }
         if (!this.exists(service.name)) {
             return {success:false,err:`Service named ${service.name} not found.`};
         }
@@ -41,6 +53,7 @@ class ServiceManager {
             this.#createServer(newPort);
         }
         this.#setServiceRedis(service);
+        await releaseLock(redisLockKey);
         return {success:true};
     }
 
@@ -74,10 +87,16 @@ class ServiceManager {
     }
 
     async deleteService(serviceName) {
+        let lock = await acquireLock(redisLockKey)
+        while (!lock) {
+            await sleep(50);
+            lock = await acquireLock(redisLockKey);
+        }
         const service = await this.#getServiceFromRedis(serviceName);
         if (service == undefined) return undefined;
         await redisClient.del("SERVICE:" + serviceName);
         this.#closeServer(service.port);
+        releaseLock(redisLockKey);
         return service;
     }
 
@@ -91,7 +110,7 @@ class ServiceManager {
 
     #createServer(service) {
         const serviceServer = http.createServer(async (req,res) => {
-            this.#handleRequest(service);
+            this.#handleRequest(req,res,service);
         });
         const servicePort = service.port;
         this.servers[servicePort] = serviceServer;
@@ -116,7 +135,7 @@ class ServiceManager {
         }
     }
 
-    async #handleRequest(service) {
+    async #handleRequest(req,res,service) {
         const requestService = await this.#getServiceFromRedis(service.name);
             const instances = requestService.instances;
             if (instances.length == 0) {
@@ -129,8 +148,8 @@ class ServiceManager {
                 case "ROUND ROBIN":
                     const currentTracker = this.roundRobinTracker[service.name].tracker;
                     instanceNameToSend = instances[currentTracker];
-                    if (currentTracker == instances.length - 1) this.roundRobinTracker[service.name] = 0;
-                    else this.roundRobinTracker[service.name]++;
+                    if (currentTracker == instances.length - 1) this.roundRobinTracker[service.name].tracker = 0;
+                    else this.roundRobinTracker[service.name].tracker++;
                     break;
                 case "RANDOM":
                     const randomTracker = Math.round(Math.random() * (instances.length - 1));
@@ -157,22 +176,30 @@ class ServiceManager {
             }
             let instanceToSend = await instanceManager.getInstance(instanceNameToSend);
             
-            await fetch(instanceToSend.location,{
+            await fetch(instanceToSend.location + req.url ,{
                 method: req.method,
                 headers: {
                     ... req.headers,
                     "load_balancing_strategy": requestService.balancingStrategy,
                     "load_balancing_version" : "v1.0",
                     "load_balancing_software" : "CUSTOM_DAVID_LOAD_BALANCER"
-                }
-            }).then((response) => {
-                res.write(response.body);
-                res.writeHead(response.status,response.headers).end();
+                },
+                body: req.body
+            }).then(async (response) => {
+                const body = await response.text();
+                res.writeHead(response.status,response.headers);
+                res.write(body);
+                res.end();
             }).catch((err) => {
                 res.writeHead(500);
                 res.end(`Error connecting to server : ${err.message}`)
             }); 
     }
+
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 const serviceManager = new ServiceManager();

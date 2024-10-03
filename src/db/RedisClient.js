@@ -6,9 +6,21 @@ const redisClient = createClient({
 
 redisClient.connect();
 
-// Handle connection errors
 redisClient.on('error', (err) => {
     console.log('Redis Client Error', err);
 });
+
+export async function acquireLock(key) {
+    const setLock = await redisClient.setNX(key, 'locked');
+    if (setLock) {
+        await redisClient.expire(key, 5);
+        return true;
+    }
+    return false;
+}
+  
+export async function releaseLock(key) { 
+    await redisClient.del(key); 
+}
 
 export default redisClient;
