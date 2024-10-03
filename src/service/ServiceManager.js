@@ -27,7 +27,7 @@ class ServiceManager {
         if (service.balancingStrategy == "ROUND ROBIN") {
             this.roundRobinTracker[service.name] = {tracker:0};
         }
-        else if (service.balancingStrategy != "RANDOM" || service.balancingStrategy != "IN REQUEST") {
+        else if (service.balancingStrategy != "RANDOM" && service.balancingStrategy != "IN REQUEST") {
             return {success:false,err:`Balancing strategy is not known.`};     
         }
         this.#setServiceRedis(service);
@@ -162,7 +162,7 @@ class ServiceManager {
                         res.end("No instance specified in request");
                         return;
                     }
-                    instanceNameToSend = instances.filter((instance) => instance.name == specificInstance)[0];
+                    instanceNameToSend = instances.filter((instance) => instance == specificInstance)[0];
                     if (instanceNameToSend == undefined) {
                         res.writeHead(400);
                         res.end("Instance with specified name does not exist");
