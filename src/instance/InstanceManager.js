@@ -1,10 +1,12 @@
+import fetch from "node-fetch";
 import redisClient, { releaseLock,acquireLock } from "../db/RedisClient.js"
 import serviceManager from "../service/ServiceManager.js";
 
 const redisLockKey = "INSTANCELOCK"
-
+const HEARTBEAT_INTERVAL = 2000
 class InstanceManager {
     constructor() {
+        this.periodicChecks = {}
     }
 
     async registerInstance(instance) {
@@ -32,8 +34,10 @@ class InstanceManager {
         instances.push(instance.name);
         service.instances = instances;
         await serviceManager.updateService(service);
+        if (instance.healthPath == undefined) instance.healthPath = "/health"
         this.#setInstanceRedis(instance);
         await releaseLock(redisLockKey);
+        this.#startServicePeriodicHealthCheck(instance.name)
         return {success:true};
     }
 
@@ -51,6 +55,7 @@ class InstanceManager {
         await serviceManager.updateService(service);
         await redisClient.del("INSTANCE:"+instanceID);
         await releaseLock(redisLockKey);
+        this.#stopServicePeriodicHealthCheck(instanceID);
         return serviceInstance;
     }
 
@@ -69,6 +74,35 @@ class InstanceManager {
 
     async #getInstanceFromRedis(instance) {
         return JSON.parse(await redisClient.get("INSTANCE:"+ instance))
+    }
+
+    bootstrapInstance(instanceID) {
+        this.#startServicePeriodicHealthCheck(instanceID)
+    }
+
+    #startServicePeriodicHealthCheck(instanceID) {
+        const intervalTimer = setInterval(async () => {
+            const instance = await this.getInstance(instanceID);
+            await fetch(instance.location + instance.healthPath,{
+                method:"GET"
+            }).then(async (response) => {
+                if (response.status != 200) {
+                    console.log(`Instance ${instanceID} is not healthy`);
+                    await this.deleteInstance(instanceID);
+                    this.#stopServicePeriodicHealthCheck(instanceID);
+                }
+            }).catch(async (err) => {
+                console.log(`Instance ${instanceID} is not healthy due to error with code ${err.code}`);
+                await this.deleteInstance(instanceID);
+                this.#stopServicePeriodicHealthCheck(instanceID);
+            });
+        }, HEARTBEAT_INTERVAL);
+        this.periodicChecks[instanceID] = intervalTimer;
+    }
+
+    #stopServicePeriodicHealthCheck(instanceID) {
+        clearInterval(this.periodicChecks[instanceID])
+        this.periodicChecks[instanceID] = undefined
     }
 }
 

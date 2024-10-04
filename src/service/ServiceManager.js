@@ -2,6 +2,7 @@ import http from "http"
 import redisClient, { releaseLock,acquireLock } from "../db/RedisClient.js";
 import instanceManager from "../instance/InstanceManager.js";
 import fetch from "node-fetch";
+import rateLimiter from "../RateLimiter.js";
 
 const redisLockKey = "SERVICELOCK"
 class ServiceManager {
@@ -132,10 +133,16 @@ class ServiceManager {
         for (const service of services) {
             this.#createServer(service);
             this.roundRobinTracker[service.name] = {tracker:0};
+            service.instances.forEach(instance => instanceManager.bootstrapInstance(instance))
         }
     }
 
     async #handleRequest(req,res,service) {
+        if (!rateLimiter.checkRateLimit(req,service.rateLimit)) {
+            res.writeHead(429);
+            res.end('Too many requests. Please try again later.');
+            return
+        }
         const requestService = await this.#getServiceFromRedis(service.name);
             const instances = requestService.instances;
             if (instances.length == 0) {
@@ -195,6 +202,7 @@ class ServiceManager {
                 res.end(`Error connecting to server : ${err.message}`)
             }); 
     }
+
 
 }
 
