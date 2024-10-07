@@ -3,6 +3,7 @@ import redisClient, { releaseLock,acquireLock } from "../db/RedisClient.js";
 import instanceManager from "../instance/InstanceManager.js";
 import fetch from "node-fetch";
 import rateLimiter from "../RateLimiter.js";
+import duplicateChecker from "../DuplicateChecker.js";
 
 const redisLockKey = "SERVICELOCK"
 class ServiceManager {
@@ -143,6 +144,20 @@ class ServiceManager {
             res.end('Too many requests. Please try again later.');
             return
         }
+        const {duplicate,processing,response:duplicateResponse} = await duplicateChecker.checkDuplicate(req,service);
+        if (duplicate){
+            if (processing) {
+                res.writeHead(202);
+                res.end('Same request already processing.');
+            }
+            else {
+                const body = duplicateResponse.body;
+                res.writeHead(duplicateResponse.status,duplicateResponse.headers);
+                res.write(body);
+                res.end();
+            }
+            return
+        }
         const requestService = await this.#getServiceFromRedis(service.name);
             const instances = requestService.instances;
             if (instances.length == 0) {
@@ -182,7 +197,7 @@ class ServiceManager {
                     return;
             }
             let instanceToSend = await instanceManager.getInstance(instanceNameToSend);
-            
+            await duplicateChecker.addDuplicate(service,req);
             await fetch(instanceToSend.location + req.url ,{
                 method: req.method,
                 headers: {
@@ -197,8 +212,10 @@ class ServiceManager {
                 res.writeHead(response.status,response.headers);
                 res.write(body);
                 res.end();
-            }).catch((err) => {
+                await duplicateChecker.finishProcessing(service,req,response.status,response.headers,body)
+            }).catch(async (err) => {
                 res.writeHead(500);
+                await duplicateChecker.removeDuplicate(service,req)
                 res.end(`Error connecting to server : ${err.message}`)
             }); 
     }

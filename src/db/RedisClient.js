@@ -18,7 +18,7 @@ export async function acquireLock(key) {
     }
     return false;
 }
-  
+
 export async function releaseLock(key) { 
     await redisClient.del(key); 
 }
